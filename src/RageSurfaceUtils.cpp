@@ -5,44 +5,159 @@
 #include "RageLog.h"
 #include "RageFile.h"
 
-uint32_t RageSurfaceUtils::decodepixel( const uint8_t *p, int bpp )
-{
-	switch(bpp)
-	{
-	case 1: return *p;
-	case 2: return *(uint16_t *)p;
-	case 3:
-		if( BYTE_ORDER == BIG_ENDIAN )
-			return p[0] << 16 | p[1] << 8 | p[2];
-		else
-			return p[0] | p[1] << 8 | p[2] << 16;
+namespace {
 
-	case 4: return *(uint32_t *)p;
-	default: return 0;	// shouldn't happen, but avoids warnings
-	}
+using DecodeFunction = uint32_t (*)(const uint8_t *);
+
+uint32_t decode1Bpp(const uint8_t *p)
+{
+    return *p;
 }
 
-void RageSurfaceUtils::encodepixel( uint8_t *p, int bpp, uint32_t pixel )
+uint32_t decode2Bpp(const uint8_t *p)
 {
-	switch(bpp)
-	{
-	case 1: *p = uint8_t(pixel); break;
-	case 2: *(uint16_t *)p = uint16_t(pixel); break;
-	case 3:
-		if( BYTE_ORDER == BIG_ENDIAN )
-		{
-			p[0] = uint8_t((pixel >> 16) & 0xff);
-			p[1] = uint8_t((pixel >> 8) & 0xff);
-			p[2] = uint8_t(pixel & 0xff);
-		} else {
-			p[0] = uint8_t(pixel & 0xff);
-			p[1] = uint8_t((pixel >> 8) & 0xff);
-			p[2] = uint8_t((pixel >> 16) & 0xff);
-		}
-		break;
-	case 4: *(uint32_t *)p = pixel; break;
-	}
+    return *(uint16_t *) p;
 }
+
+uint32_t decode3Bpp(const uint8_t *p)
+{
+#if (BYTE_ORDER == BIG_ENDIAN)
+    return p[0] << 16 | p[1] << 8 | p[2];
+#else
+    return p[0] | p[1] << 8 | p[2] << 16;
+#endif
+}
+
+uint32_t decode4Bpp(const uint8_t *p)
+{
+    return *(uint32_t *) p;
+}
+
+DecodeFunction decoderForBpp(int bpp)
+{
+    DecodeFunction decode;
+
+    switch (bpp) {
+    case 2:
+        decode = decode2Bpp;
+        break;
+    case 3:
+        decode = decode3Bpp;
+        break;
+    case 4:
+        decode = decode4Bpp;
+        break;
+    case 1:
+    default:
+        decode = decode1Bpp;
+        break;
+    }
+    return decode;
+}
+
+using EncodeFunction = void (*)(uint8_t *, uint32_t);
+
+void encode1Bpp(uint8_t *p, uint32_t pixel)
+{
+    *p = uint8_t(pixel);
+}
+
+void encode2Bpp(uint8_t *p, uint32_t pixel)
+{
+    *(uint16_t *) p = uint16_t(pixel);
+}
+
+void encode3Bpp(uint8_t *p, uint32_t pixel)
+{
+#if (BYTE_ORDER == BIG_ENDIAN)
+    {
+        p[0] = uint8_t((pixel >> 16) & 0xff);
+        p[1] = uint8_t((pixel >> 8) & 0xff);
+        p[2] = uint8_t(pixel & 0xff);
+    }
+#else
+    {
+        p[0] = uint8_t(pixel & 0xff);
+        p[1] = uint8_t((pixel >> 8) & 0xff);
+        p[2] = uint8_t((pixel >> 16) & 0xff);
+    }
+#endif
+}
+
+void encode4Bpp(uint8_t *p, uint32_t pixel)
+{
+    *(uint32_t *) p = pixel;
+}
+
+EncodeFunction encoderForBpp(int bpp)
+{
+    switch (bpp) {
+    case 2:
+        return encode2Bpp;
+
+    case 3:
+        return encode3Bpp;
+
+    case 4:
+        return encode4Bpp;
+
+    case 1:
+    default:
+        return encode1Bpp;
+    }
+}
+
+uint32_t decodepixel(const uint8_t *p, int bpp)
+{
+    switch (bpp) {
+    case 1:
+        return *p;
+    case 2:
+        return *(uint16_t *) p;
+    case 3:
+#if (BYTE_ORDER == BIG_ENDIAN)
+        return p[0] << 16 | p[1] << 8 | p[2];
+#else
+        return p[0] | p[1] << 8 | p[2] << 16;
+#endif
+    case 4:
+        return *(uint32_t *) p;
+    default:
+        return 0; // shouldn't happen, but avoids warnings
+    }
+}
+
+void encodepixel(uint8_t *p, int bpp, uint32_t pixel)
+{
+    switch (bpp) {
+    case 1:
+        *p = uint8_t(pixel);
+        break;
+    case 2:
+        *(uint16_t *) p = uint16_t(pixel);
+        break;
+    case 3:
+#if (BYTE_ORDER == BIG_ENDIAN)
+    {
+        p[0] = uint8_t((pixel >> 16) & 0xff);
+        p[1] = uint8_t((pixel >> 8) & 0xff);
+        p[2] = uint8_t(pixel & 0xff);
+    }
+#else
+    {
+        p[0] = uint8_t(pixel & 0xff);
+        p[1] = uint8_t((pixel >> 8) & 0xff);
+        p[2] = uint8_t((pixel >> 16) & 0xff);
+    }
+#endif
+    break;
+    case 4:
+        *(uint32_t *) p = pixel;
+        break;
+    }
+}
+
+} // namespace
 
 // Get and set colors without scaling to 0..255.
 void RageSurfaceUtils::GetRawRGBAV( uint32_t pixel, const RageSurfaceFormat &fmt, uint8_t *v )
@@ -181,6 +296,8 @@ static void FindAlphaRGB(const RageSurface *img, uint8_t &r, uint8_t &g, uint8_t
 	if( img->format->BitsPerPixel > 8 && !img->format->Amask )
 		return;
 
+	DecodeFunction decode{decoderForBpp(img->format->BytesPerPixel)};
+
 	// Eww. Sorry. Iterate front-to-back or in reverse.
 	for(int y = reverse? img->h-1:0;
 		reverse? (y >=0):(y < img->h); reverse? (--y):(++y))
@@ -191,7 +308,7 @@ static void FindAlphaRGB(const RageSurface *img, uint8_t &r, uint8_t &g, uint8_t
 
 		for(int x = 0; x < img->w; ++x)
 		{
-			uint32_t val = RageSurfaceUtils::decodepixel(row, img->format->BytesPerPixel);
+			uint32_t val = decode(row);
 			if( img->format->BitsPerPixel == 8 )
 			{
 				if( img->format->palette->colors[val].a )
@@ -246,6 +363,9 @@ static void SetAlphaRGB(const RageSurface *pImg, uint8_t r, uint8_t g, uint8_t b
 	if( pImg->format->BitsPerPixel > 8 && !pImg->format->Amask )
 		return;
 
+	DecodeFunction decode{decoderForBpp(pImg->format->BytesPerPixel)};
+	EncodeFunction encode{encoderForBpp(pImg->format->BytesPerPixel)};
+
 	uint32_t trans;
 	pImg->format->MapRGBA( r, g, b, 0, trans );
 	for( int y = 0; y < pImg->h; ++y )
@@ -254,10 +374,10 @@ static void SetAlphaRGB(const RageSurface *pImg, uint8_t r, uint8_t g, uint8_t b
 
 		for( int x = 0; x < pImg->w; ++x )
 		{
-			uint32_t val = RageSurfaceUtils::decodepixel( row, pImg->format->BytesPerPixel );
+			uint32_t val = decode(row);
 			if( val != trans && !(val&pImg->format->Amask) )
 			{
-				RageSurfaceUtils::encodepixel( row, pImg->format->BytesPerPixel, trans );
+				encode(row, trans);
 			}
 
 			row += pImg->format->BytesPerPixel;
@@ -332,13 +452,15 @@ int RageSurfaceUtils::FindSurfaceTraits( const RageSurface *img )
 		max_alpha = img->format->Amask;
 	}
 
+	DecodeFunction decode{decoderForBpp(img->format->BytesPerPixel)};
+
 	for(int y = 0; y < img->h; ++y)
 	{
 		uint8_t *row = (uint8_t *)img->pixels + img->pitch*y;
 
 		for(int x = 0; x < img->w; ++x)
 		{
-			uint32_t val = decodepixel(row, img->format->BytesPerPixel);
+			uint32_t val = decode(row);
 
 			uint32_t alpha;
 			if( img->format->BitsPerPixel == 8 )
@@ -575,12 +697,15 @@ static bool blit_rgba_to_rgba( const RageSurface *src_surf, const RageSurface *d
 		}
 	}
 
+	DecodeFunction decode{decoderForBpp(src_surf->format->BytesPerPixel)};
+	EncodeFunction encode{encoderForBpp(dst_surf->format->BytesPerPixel)};
+
 	while( height-- )
 	{
 		int x = 0;
 		while( x++ < width )
 		{
-			unsigned int pixel = RageSurfaceUtils::decodepixel( src, src_surf->format->BytesPerPixel );
+			unsigned int pixel = decode(src);
 
 			// Convert pixel to the destination format.
 			unsigned int opixel = 0;
@@ -591,7 +716,7 @@ static bool blit_rgba_to_rgba( const RageSurface *src_surf, const RageSurface *d
 			}
 
 			// Store it.
-			RageSurfaceUtils::encodepixel( dst, dst_surf->format->BytesPerPixel, opixel );
+			encode(dst, opixel);
 
 			src += src_surf->format->BytesPerPixel;
 			dst += dst_surf->format->BytesPerPixel;
@@ -616,12 +741,15 @@ static bool blit_generic( const RageSurface *src_surf, const RageSurface *dst_su
 	const int srcskip = src_surf->pitch - width*src_surf->format->BytesPerPixel;
 	const int dstskip = dst_surf->pitch - width*dst_surf->format->BytesPerPixel;
 
+	DecodeFunction decode{decoderForBpp(src_surf->format->BytesPerPixel)};
+	EncodeFunction encode{encoderForBpp(dst_surf->format->BytesPerPixel)};
+
 	while( height-- )
 	{
 		int x = 0;
 		while( x++ < width )
 		{
-			unsigned int pixel = RageSurfaceUtils::decodepixel( src, src_surf->format->BytesPerPixel );
+			unsigned int pixel = decode(src);
 
 			uint8_t colors[4];
 				// Convert pixel to the destination RGBA.
@@ -632,7 +760,7 @@ static bool blit_generic( const RageSurface *src_surf, const RageSurface *dst_su
 			pixel = RageSurfaceUtils::SetRGBAV(dst_surf->format, colors);
 
 			// Store it.
-			RageSurfaceUtils::encodepixel( dst, dst_surf->format->BytesPerPixel, pixel );
+			encode(dst, pixel);
 
 			src += src_surf->format->BytesPerPixel;
 			dst += dst_surf->format->BytesPerPixel;
@@ -711,10 +839,13 @@ void RageSurfaceUtils::CorrectBorderPixels( RageSurface *img, int width, int hei
 		int offset = img->format->BytesPerPixel * (width-1);
 		uint8_t *p = (uint8_t *) img->pixels + offset;
 
+		DecodeFunction decode{decoderForBpp(img->format->BytesPerPixel)};
+		EncodeFunction encode{encoderForBpp(img->format->BytesPerPixel)};
+
 		for( int y = 0; y < height; ++y )
 		{
-			uint32_t pixel = decodepixel( p, img->format->BytesPerPixel );
-			encodepixel( p+img->format->BytesPerPixel, img->format->BytesPerPixel, pixel );
+			uint32_t pixel = decode(p);
+			encode(p+img->format->BytesPerPixel, pixel);
 
 			p += img->pitch;
 		}
@@ -891,12 +1022,14 @@ RageSurface *RageSurfaceUtils::PalettizeToGrayscale( const RageSurface *src_surf
 	const int srcskip = src_surf->pitch - width*src_surf->format->BytesPerPixel;
 	const int dstskip = dst_surf->pitch - width*dst_surf->format->BytesPerPixel;
 
+	DecodeFunction decode{decoderForBpp(src_surf->format->BytesPerPixel)};
+
 	while( height-- )
 	{
 		int x = 0;
 		while( x++ < width )
 		{
-			unsigned int pixel = decodepixel( src, src_surf->format->BytesPerPixel );
+			unsigned int pixel = decode(src);
 
 			uint8_t colors[4];
 			GetRGBAV(pixel, src_surf, colors);
@@ -945,10 +1078,12 @@ static bool ImageUsesOffHotPink( const RageSurface *img )
 	if( !img->format->MapRGBA( 0xF8, 0, 0xF8, 0xFF, OffHotPink ) )
 		return false;
 
+	DecodeFunction decode{decoderForBpp(img->format->BytesPerPixel)};
+
 	const uint8_t *p = img->pixels;
 	for( int x = 0; x < img->w; ++x )
 	{
-		uint32_t val = RageSurfaceUtils::decodepixel( p, img->format->BytesPerPixel );
+		uint32_t val = decode(p);
 		if( val == OffHotPink )
 			return true;
 		p += img->format->BytesPerPixel;
@@ -958,7 +1093,7 @@ static bool ImageUsesOffHotPink( const RageSurface *img )
 	p += img->pitch * (img->h-1);
 	for( int i=0; i < img->w; i++ )
 	{
-		uint32_t val = RageSurfaceUtils::decodepixel( p, img->format->BytesPerPixel );
+		uint32_t val = decode(p);
 		if( val == OffHotPink )
 			return true;
 		p += img->format->BytesPerPixel;
@@ -1014,15 +1149,18 @@ void RageSurfaceUtils::ApplyHotPinkColorKey( RageSurface *&img )
 	if( !bHaveColorKey )
 		return;
 
+	DecodeFunction decode{decoderForBpp(img->format->BytesPerPixel)};
+	EncodeFunction encode{encoderForBpp(img->format->BytesPerPixel)};
+
 	for( int y = 0; y < img->h; ++y )
 	{
 		uint8_t *row = img->pixels + img->pitch*y;
 
 		for( int x = 0; x < img->w; ++x )
 		{
-			uint32_t val = decodepixel( row, img->format->BytesPerPixel );
+			uint32_t val = decode(row);
 			if( val == HotPink )
-				encodepixel( row, img->format->BytesPerPixel, 0 );
+				encode(row, 0);
 
 			row += img->format->BytesPerPixel;
 		}

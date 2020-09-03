@@ -11,8 +11,6 @@ struct RageSurface;
 /** @brief Utility functions for the RageSurfaces. */
 namespace RageSurfaceUtils
 {
-	uint32_t decodepixel( const uint8_t *p, int bpp );
-	void encodepixel( uint8_t *p, int bpp, uint32_t pixel );
 
 	void GetRawRGBAV( uint32_t pixel, const RageSurfaceFormat &fmt, uint8_t *v );
 	void GetRawRGBAV( const uint8_t *p, const RageSurfaceFormat &fmt, uint8_t *v );
